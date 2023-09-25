@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+//import "google/protobuf/wrappers.proto";
+//import "google/protobuf/empty.proto";
+
+option go_package           = "/bidder;bidder";
+
+package models;
+
+message GhostBid {
+  int32  advertiser_id       = 1;
+  int32  campaign_id         = 2;
+  int32  placement_id        = 3;
+  int32  creative_id         = 4;
+  string dma                 = 5;
+  string bid_id              = 7;
+  string imp_id              = 8;
+  string deal_id             = 9;
+  string domain              = 10;
+  string page                = 11;
+  string user_id             = 12;
+  string geo_country         = 13;
+  string geo_city            = 14;
+  string geo_zip             = 15;
+  string geo_metro           = 16;
+  string inventory_source    = 17;
+  string devicetype          = 18;
+  float  price               = 19;
+  string data_center         = 20;
+  string timestamp_utc       = 21;
+  string creative_type       = 22;
+  string individual_id       = 23;
+  string ip_address          = 24;
+  string household_id        = 25;
+  bool   testing             = 26;
+  string internal_request_id = 27;
+  string external_request_id = 28;
+
+  string currency_code           = 29;
+  float  price_in_local_currency = 30;
+
+  int64                epoch        = 31;
+  bool                 isDummy      = 32;
+
+  double local_to_usd_conversion_rate = 33;
+}
+
+message GhostBidBatch {
+  int64 ts = 1;
+  repeated GhostBid payload = 2;
+}
