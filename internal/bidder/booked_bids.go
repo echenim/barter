@@ -9,6 +9,12 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// Note
+// here buy and sell orders are matched in real-time, and efficient,
+// thread-safe operations are crucial. The use of mutexes and careful structuring of
+// the methods ensures that the order book can be accessed and modified safely in a
+// concurrent environment.
+
 type BookBid struct {
 	asks []*Limit
 	bids []*Limit
@@ -21,6 +27,9 @@ type BookBid struct {
 	Orders    map[int64]*Bid
 }
 
+// NewBookBid creates and returns a new instance of BookBid.
+// This function initializes slices for asks, bids, and trades,
+// and creates maps for AskLimits, BidLimits, and Orders.
 func NewBookBid() *BookBid {
 	return &BookBid{
 		asks:      []*Limit{},
@@ -32,6 +41,10 @@ func NewBookBid() *BookBid {
 	}
 }
 
+// PlaceMarketOrder places a market bid into the book.
+// It takes a Bid object as a parameter and returns a slice of Match objects.
+// This method locks the BookBid for concurrent access, calculates matches for the given bid,
+// and records the trades. It panics if there is insufficient volume for the bid.
 func (ob *BookBid) PlaceMarketOrder(o *Bid) []Match {
 	ob.mu.Lock()
 	defer ob.mu.Unlock()
@@ -83,6 +96,9 @@ func (ob *BookBid) PlaceMarketOrder(o *Bid) []Match {
 	return matches
 }
 
+// PlaceLimitOrder places a limit order in the book.
+// It locks the current state, checks or creates the necessary limit,
+// logs the new order information, and adds the order to the limit and book.
 func (ob *BookBid) PlaceLimitOrder(price float64, o *Bid) {
 	var limit *Limit
 
@@ -118,6 +134,9 @@ func (ob *BookBid) PlaceLimitOrder(price float64, o *Bid) {
 	limit.AddOrder(o)
 }
 
+// clearLimit removes a limit from the book.
+// It is used when all orders at a limit have been fulfilled.
+// The function updates the limits map and the bids or asks slice depending on the type of limit.
 func (ob *BookBid) clearLimit(bid bool, l *Limit) {
 	if bid {
 		delete(ob.BidLimits, l.Price)
@@ -140,6 +159,8 @@ func (ob *BookBid) clearLimit(bid bool, l *Limit) {
 	fmt.Printf("clearing limit price level [%.2f]\n", l.Price)
 }
 
+// CancelOrder handles the cancellation of an order.
+// It removes the order from its limit and the book, and clears the limit if it becomes empty.
 func (ob *BookBid) CancelOrder(o *Bid) {
 	limit := o.Limit
 	limit.DeleteOrder(o)
@@ -150,6 +171,8 @@ func (ob *BookBid) CancelOrder(o *Bid) {
 	}
 }
 
+// BidTotalVolume calculates the total volume of all bid orders.
+// It iterates over all bids and sums up their total volumes.
 func (ob *BookBid) BidTotalVolume() float64 {
 	totalVolume := 0.0
 
@@ -160,6 +183,8 @@ func (ob *BookBid) BidTotalVolume() float64 {
 	return totalVolume
 }
 
+// AskTotalVolume calculates the total volume of all ask orders.
+// It iterates over all asks and sums up their total volumes.
 func (ob *BookBid) AskTotalVolume() float64 {
 	totalVolume := 0.0
 
@@ -170,11 +195,15 @@ func (ob *BookBid) AskTotalVolume() float64 {
 	return totalVolume
 }
 
+// Asks returns a sorted slice of all ask limits.
+// The limits are sorted based on the criteria defined in ByBestAsk.
 func (ob *BookBid) Asks() []*Limit {
 	sort.Sort(ByBestAsk{ob.asks})
 	return ob.asks
 }
 
+// Bids returns a sorted slice of all bid limits.
+// The limits are sorted based on the criteria defined in ByBestBid.
 func (ob *BookBid) Bids() []*Limit {
 	sort.Sort(ByBestBid{ob.bids})
 	return ob.bids

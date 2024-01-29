@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/anthdm/crypto-exchange/orderbook"
+	bd "github.com/echenim/barter/internal/bidder"
 	md "github.com/echenim/barter/internal/models"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -32,15 +32,17 @@ type Exchange struct {
 	Client *ethclient.Client
 	mu     sync.RWMutex
 	Users  map[int64]*md.User
-	// Orders maps a user to his orders.
-	Orders     map[int64][]*orderbook.Order
+	// bid maps a user to his bids.
+	bids     map[int64][]*bd.Bid
 	PrivateKey *ecdsa.PrivateKey
-	orderbooks map[md.Market]*orderbook.Orderbook
+	bidBk map[md.Market]*bd.BookBid
 }
 
+// NewExchange creates a new Exchange instance with a specified private key and Ethereum client.
+// It initializes the bid book for the ETH market.
 func NewExchange(privateKey string, client *ethclient.Client) (*Exchange, error) {
-	orderbooks := make(map[md.Market]*orderbook.Orderbook)
-	orderbooks[MarketETH] = orderbook.NewOrderbook()
+	bidbooks := make(map[md.Market]*bd.BookBid)
+	bidbooks[MarketETH] = bd.NewBookBid()
 
 	pk, err := crypto.HexToECDSA(privateKey)
 	if err != nil {
@@ -50,9 +52,9 @@ func NewExchange(privateKey string, client *ethclient.Client) (*Exchange, error)
 	return &Exchange{
 		Client:     client,
 		Users:      make(map[int64]*md.User),
-		Orders:     make(map[int64][]*orderbook.Order),
+		bids:     make(map[int64][]*bd.Bid),
 		PrivateKey: pk,
-		orderbooks: orderbooks,
+		bidBk: bidbooks,
 	}, nil
 }
 
@@ -61,6 +63,7 @@ type GetOrdersResponse struct {
 	Bids []md.Order
 }
 
+// RegisterUser adds a new user to the exchange with a given private key and user ID.
 func (ex *Exchange) RegisterUser(pk string, userId int64) {
 	user := md.NewUser(pk, userId)
 	ex.Users[userId] = user
@@ -70,16 +73,18 @@ func (ex *Exchange) RegisterUser(pk string, userId int64) {
 	}).Info("new exchange user")
 }
 
+// GetTrades returns the trades for a specified market from the exchange.
 func (ex *Exchange) GetTrades(c echo.Context) error {
 	market := md.Market(c.Param("market"))
-	ob, ok := ex.orderbooks[market]
+	ob, ok := ex.bidBk[market]
 	if !ok {
-		return c.JSON(http.StatusBadRequest, md.APIError{Error: "orderbook not found"})
+		return c.JSON(http.StatusBadRequest, md.APIError{Error: "bidBK not found"})
 	}
 
 	return c.JSON(http.StatusOK, ob.Trades)
 }
 
+// GetOrders retrieves the current orders (bids and asks) for a specific user.
 func (ex *Exchange) GetOrders(c echo.Context) error {
 	userIDStr := c.Param("userID")
 	userID, err := strconv.Atoi(userIDStr)
@@ -88,14 +93,14 @@ func (ex *Exchange) GetOrders(c echo.Context) error {
 	}
 
 	ex.mu.RLock()
-	orderbookOrders := ex.Orders[int64(userID)]
+	orderbookOrders := ex.bids[int64(userID)]
 	ordersResp := &GetOrdersResponse{
 		Asks: []md.Order{},
 		Bids: []md.Order{},
 	}
 
 	for i := 0; i < len(orderbookOrders); i++ {
-		// It could be that the order is getting filled even though its included in this
+		// It could be that the bid is getting filled even though its included in this
 		// response. We must double check if the limit is not nil
 		if orderbookOrders[i].Limit == nil {
 			continue
@@ -121,9 +126,10 @@ func (ex *Exchange) GetOrders(c echo.Context) error {
 	return c.JSON(http.StatusOK, ordersResp)
 }
 
+// GetBook provides the order book for a specified market, including total bid and ask volumes.
 func (ex *Exchange) GetBook(c echo.Context) error {
 	market := md.Market(c.Param("market"))
-	ob, ok := ex.orderbooks[market]
+	ob, ok := ex.bidBk[market]
 	if !ok {
 		return c.JSON(http.StatusBadRequest, map[string]any{"msg": "market not found"})
 	}
@@ -170,10 +176,11 @@ type PriceResponse struct {
 	Price float64
 }
 
+// GetBestBid finds the best (highest) bid for a specified market.
 func (ex *Exchange) GetBestBid(c echo.Context) error {
 	var (
 		market = md.Market(c.Param("market"))
-		ob     = ex.orderbooks[market]
+		ob     = ex.bidBk[market]
 		order  = md.Order{}
 	)
 
@@ -190,10 +197,11 @@ func (ex *Exchange) GetBestBid(c echo.Context) error {
 	return c.JSON(http.StatusOK, order)
 }
 
+// GetBestAsk finds the best (lowest) ask for a specified market.
 func (ex *Exchange) GetBestAsk(c echo.Context) error {
 	var (
 		market = md.Market(c.Param("market"))
-		ob     = ex.orderbooks[market]
+		ob     = ex.bidBk[market]
 		order  = md.Order{}
 	)
 
@@ -210,32 +218,34 @@ func (ex *Exchange) GetBestAsk(c echo.Context) error {
 	return c.JSON(http.StatusOK, order)
 }
 
-func (ex *Exchange) CancelOrder(c echo.Context) error {
+// CancelOrder cancels a specific bid by its ID in the ETH market.
+func (ex *Exchange) CancelBid(c echo.Context) error {
 	idStr := c.Param("id")
 	id, _ := strconv.Atoi(idStr)
 
-	ob := ex.orderbooks[MarketETH]
-	order := ob.Orders[int64(id)]
-	ob.CancelOrder(order)
+	ob := ex.bidBk[MarketETH]
+	bid := ob.Orders[int64(id)]
+	ob.CancelOrder(bid)
 
 	log.Println("order canceled id => ", id)
 
-	return c.JSON(200, map[string]any{"msg": "order deleted"})
+	return c.JSON(200, map[string]any{"msg": "bid deleted"})
 }
 
-func (ex *Exchange) placeMarketOrder(market md.Market, order *orderbook.Order) ([]orderbook.Match, []*md.MatchedBid) {
-	ob := ex.orderbooks[market]
-	matches := ob.PlaceMarketOrder(order)
-	matchedOrders := make([]*md.MatchedBid, len(matches))
+// placeMarketOrder processes a market bid, matching it with existing bid in the book.
+func (ex *Exchange) placeMarketOrder(market md.Market, bid *bd.Bid) ([]bd.Match, []*md.MatchedBid) {
+	ob := ex.bidBk[market]
+	matches := ob.PlaceMarketOrder(bid)
+	matchedBid := make([]*md.MatchedBid, len(matches))
 
 	isBid := false
-	if order.Bid {
+	if bid.Bid {
 		isBid = true
 	}
 
 	totalSizeFilled := 0.0
 	sumPrice := 0.0
-	for i := 0; i < len(matchedOrders); i++ {
+	for i := 0; i < len(matchedBid); i++ {
 		id := matches[i].Bid.ID
 		limitUserID := matches[i].Bid.UserID
 		if isBid {
@@ -243,7 +253,7 @@ func (ex *Exchange) placeMarketOrder(market md.Market, order *orderbook.Order) (
 			id = matches[i].Ask.ID
 		}
 
-		matchedOrders[i] = &md.MatchedBid{
+		matchedBid[i] = &md.MatchedBid{
 			UserID: limitUserID,
 			ID:     id,
 			Size:   matches[i].SizeFilled,
@@ -257,36 +267,37 @@ func (ex *Exchange) placeMarketOrder(market md.Market, order *orderbook.Order) (
 	avgPrice := sumPrice / float64(len(matches))
 
 	logrus.WithFields(logrus.Fields{
-		"type":     order.Type(),
+		"type":     bid.Type(),
 		"size":     totalSizeFilled,
 		"avgPrice": avgPrice,
-	}).Info("filled market order")
+	}).Info("filled market bid")
 
-	newOrderMap := make(map[int64][]*orderbook.Order)
+	newOrderMap := make(map[int64][]*bd.Bid)
 
 	ex.mu.Lock()
-	for userID, orderbookOrders := range ex.Orders {
-		for i := 0; i < len(orderbookOrders); i++ {
-			// If the order is not filled we place it in the map copy.
-			// this means that size of the order = 0
-			if !orderbookOrders[i].IsFilled() {
-				newOrderMap[userID] = append(newOrderMap[userID], orderbookOrders[i])
+	for userID, bidBK := range ex.bids {
+		for i := 0; i < len(bidBK); i++ {
+			// If the bid is not filled we place it in the map copy.
+			// this means that size of the bids = 0
+			if !bidBK[i].IsFilled() {
+				newOrderMap[userID] = append(newOrderMap[userID], bidBK[i])
 			}
 		}
 	}
-	ex.Orders = newOrderMap
+	ex.bids = newOrderMap
 	ex.mu.Unlock()
 
-	return matches, matchedOrders
+	return matches, matchedBid
 }
 
-func (ex *Exchange) placeLimitOrder(market md.Market, price float64, order *orderbook.Order) error {
-	ob := ex.orderbooks[market]
-	ob.PlaceLimitOrder(price, order)
+// placeLimitOrder adds a limit bid to the bid book for a specific market.
+func (ex *Exchange) placeLimitOrder(market md.Market, price float64, bid *bd.Bid) error {
+	ob := ex.bidBk[market]
+	ob.PlaceLimitOrder(price, bid)
 
-	// keep track of the user orders
+	// keep track of the user bid
 	ex.mu.Lock()
-	ex.Orders[order.UserID] = append(ex.Orders[order.UserID], order)
+	ex.bids[bid.UserID] = append(ex.bids[bid.UserID], bid)
 	ex.mu.Unlock()
 
 	return nil
@@ -296,6 +307,7 @@ type PlaceOrderResponse struct {
 	OrderID int64
 }
 
+// PlaceOrder processes an bid request from a user, placing either a market or limit bid.
 func (ex *Exchange) PlaceOrder(c echo.Context) error {
 	var placeOrderData md.PlaceOrderRequest
 	if err := json.NewDecoder(c.Request().Body).Decode(&placeOrderData); err != nil {
@@ -303,16 +315,16 @@ func (ex *Exchange) PlaceOrder(c echo.Context) error {
 	}
 
 	market := md.Market(placeOrderData.Market)
-	order := orderbook.NewOrder(placeOrderData.Bid, placeOrderData.Size, placeOrderData.UserID)
+	order := bd.NewBid(placeOrderData.Bid, placeOrderData.Size, placeOrderData.UserID)
 
-	// Limit orders
+	// Limit bids
 	if placeOrderData.Type == LimitOrder {
 		if err := ex.placeLimitOrder(market, placeOrderData.Price, order); err != nil {
 			return err
 		}
 	}
 
-	// market orders
+	// market bid
 	if placeOrderData.Type == MarketOrder {
 		matches, _ := ex.placeMarketOrder(market, order)
 		if err := ex.matches(matches); err != nil {
@@ -327,7 +339,8 @@ func (ex *Exchange) PlaceOrder(c echo.Context) error {
 	return c.JSON(200, resp)
 }
 
-func (ex *Exchange) matches(matches []orderbook.Match) error {
+// matches updates user balances based on the results of executed trades.
+func (ex *Exchange) matches(matches []bd.Match) error {
 	for _, match := range matches {
 		fromUser, ok := ex.Users[match.Ask.UserID]
 		if !ok {
@@ -354,6 +367,7 @@ func (ex *Exchange) matches(matches []orderbook.Match) error {
 	return nil
 }
 
+// transferETH handles the Ethereum transaction for transferring ETH from one user to another.
 func transferETH(client *ethclient.Client, fromPrivKey *ecdsa.PrivateKey, to common.Address, amount *big.Int) error {
 	ctx := context.Background()
 	publicKey := fromPrivKey.Public()

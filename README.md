@@ -1,4 +1,4 @@
-# Barter Cryptocurrency Exchange Development
+# Barter Cryptocurrency Exchanger
 
 ## Introduction
 
@@ -14,7 +14,7 @@ Welcome to the repository for our new cryptocurrency exchange platform project. 
 
 ### Definitions and Acronyms
 
-- **Exchange**: Cryptocurrency Exchange
+- **Barter**: Cryptocurrency Exchange
 - **API**: Application Programming Interface
 - **KYC**: Know Your Customer
 - **AML**: Anti-Money Laundering

@@ -2,14 +2,26 @@ package bidder
 
 import "sort"
 
+// Note
+// This code involves creating and managing limit orders in a financial trading system.
+// Each Limit object represents a specific price point and contains orders (Bid objects)
+// at that price. The code allows adding and removing orders, and processing (filling)
+// incoming orders against existing ones. The filling process involves matching orders
+// based on their size and updating them accordingly.
+
+// Limit represents a single limit with a price.
+// Assuming there's a predefined struct 'Limit' with a field 'Price'.
 type Limit struct {
 	Price       float64
 	Orders      Bids
 	TotalVolume float64
 }
 
+// Limits is a slice of pointers to Limit objects.
 type Limits []*Limit
 
+// NewLimit creates a new Limit object with the specified price.
+// It initializes an empty slice of Bids for the Orders field.
 func NewLimit(price float64) *Limit {
 	return &Limit{
 		Price:  price,
@@ -17,12 +29,17 @@ func NewLimit(price float64) *Limit {
 	}
 }
 
+// AddOrder adds a new Bid to the Limit.
+// It sets the Limit of the Bid to itself and updates the total volume of the Limit.
 func (l *Limit) AddOrder(o *Bid) {
 	o.Limit = l
 	l.Orders = append(l.Orders, o)
 	l.TotalVolume += o.Size
 }
 
+// DeleteOrder removes a Bid from the Limit's orders.
+// It adjusts the slice to remove the Bid and updates the total volume.
+// Finally, it sorts the Orders slice.
 func (l *Limit) DeleteOrder(o *Bid) {
 	for i := 0; i < len(l.Orders); i++ {
 		if l.Orders[i] == o {
@@ -37,6 +54,8 @@ func (l *Limit) DeleteOrder(o *Bid) {
 	sort.Sort(l.Orders)
 }
 
+// Fill processes an incoming Bid and attempts to fill it with existing Orders.
+// It returns a slice of Match objects representing the filled orders.
 func (l *Limit) Fill(o *Bid) []Match {
 	var (
 		matches        []Match
@@ -65,6 +84,8 @@ func (l *Limit) Fill(o *Bid) []Match {
 	return matches
 }
 
+// fillOrder calculates the match between two Bids (a and b).
+// It updates the size of the Bids based on the match and returns a Match object.
 func (l *Limit) fillOrder(a, b *Bid) Match {
 	var (
 		bid        *Bid

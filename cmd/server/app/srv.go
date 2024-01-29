@@ -37,7 +37,7 @@ func StartServer() {
 	e.GET("/book/:market/bid", ex.GetBestBid)
 	e.GET("/book/:market/ask", ex.GetBestAsk)
 
-	e.DELETE("/order/:id", ex.CancelOrder)
+	e.DELETE("/order/:id", ex.CancelBid)
 
 	e.Start(":3000")
 }
